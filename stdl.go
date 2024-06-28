@@ -91,6 +91,7 @@ import requests
 streamtapeVideoURL = os.environ["StreamTapeVideoURL"]
 unix_sock_path = os.environ["unixSocketPath"]
 
+# stolen from  https://github.com/fluffysatoshi/streamtape2curl/blob/master/streamtape2curl.py
 html = requests.get(streamtapeVideoURL).content.decode()
 token = re.match(r".*document.getElementById.*\('norobotlink'\).innerHTML =.*?token=(.*?)'.*?;", html, re.M|re.S).group(1)
 infix=re.match(r'.*<div id="ideoooolink" style="display:none;">(.*?token=).*?<[/]div>', html, re.M|re.S).group(1)
