@@ -47,12 +47,6 @@ func GetStreamTapeVideoTitleAndURL(streamtapeVideoURL string) (string, string, e
 		return "", "", errors.New("couldt get videoTitle")
 	}
 
-	fmt.Printf(
-		"\n==< TITLE >==\n%s\n\n==< Link >==\n%s\n\n",
-		videoTitle,
-		videoLink,
-	)
-
 	url, err := url.Parse(streamtapeVideoURL)
 	if err != nil {
 		return "", "", errors.New("couldt parse StreamTape-Video-URL")
