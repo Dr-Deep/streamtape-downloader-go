@@ -6,13 +6,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"time"
 )
-
-/*
-   jeden block zählen, hash?
-   downloads fortsetzen können
-*/
 
 type progressReader struct {
 	Reader io.Reader
@@ -77,4 +73,17 @@ func downloadFile(filePath string, downloadURL string) error {
 	fmt.Printf("Took: %.2fs\n", float64(time.Now().UnixMilli()-startTime)/1000)
 
 	return nil
+}
+
+func downloadFileWithYTDL(filePath string, downloadURL string) error {
+	var cmd = exec.Command("yt-dlp", "-f mp4", "-c", "-o "+filePath, downloadURL)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		return err
+	} else {
+		return cmd.Wait()
+	}
 }

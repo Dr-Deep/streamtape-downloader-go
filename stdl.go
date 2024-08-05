@@ -1,118 +1,69 @@
 package main
 
-// #cgo pkg-config: python-3.9-embed
-// #include <Python.h>
-import "C"
-
 import (
-	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
-	"net"
-	"os"
-	"path/filepath"
-	"unsafe"
+	"net/http"
+	"net/url"
+	"regexp"
 )
 
-func DownloadStreamtapeLink(downloadPath string, streamtapeVideoURL string) error {
-
-	title, downloadURL, err := GetStreamTapeVideoTitleAndURL(streamtapeVideoURL)
-	if err != nil {
-		return err
-	}
-
-	if downloadPath == "" {
-		downloadPath = filepath.Clean(title) // || $HOME/Downloads/title
-	}
-
-	return downloadFile(downloadPath, downloadURL)
-}
-
-// könnte panicen
-// returns title, downloadURL
+// returns title, link, error
 func GetStreamTapeVideoTitleAndURL(streamtapeVideoURL string) (string, string, error) {
 
-	// wir kommunizieren über unix sockets && env vars
-	// zu faul für C-Python-API docs; Sorry
-
-	var unixSocketPath = "/tmp/serien-downloader.sock"
-
-	socket, err := net.Listen("unix", unixSocketPath)
+	resp, err := http.Get(streamtapeVideoURL)
 	if err != nil {
 		return "", "", err
 	}
-	defer os.Remove(unixSocketPath)
 
-	var rawJson []byte
-	go func() {
-		conn, err := socket.Accept()
-		if err != nil {
-			panic(err)
-		}
-		defer conn.Close()
-
-		// lesen
-		buf, err := io.ReadAll(conn)
-		if err != nil {
-			panic(err)
-		}
-
-		rawJson = buf
-	}()
-
-	py_scraper(unixSocketPath, streamtapeVideoURL)
-
-	//
-	type sus struct {
-		StreamTapeVideoTitle       string
-		StreamTapeVideoDownloadURL string
+	if resp.StatusCode != 200 {
+		return "", "", errors.New("Server Response Code != 200")
 	}
-	var susValue sus
-	if err := json.Unmarshal(rawJson, &susValue); err != nil {
+
+	_respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return "", "", err
 	}
+	defer resp.Body.Close()
+	respBody := string(_respBody)
 
-	return susValue.StreamTapeVideoTitle, susValue.StreamTapeVideoDownloadURL, nil
-}
+	var (
+		// Video Link
+		videoLink = regexp.MustCompile(
+			`/get_video\?id=[a-zA-Z0-9]+&expires=[a-zA-Z0-9]+&ip=[a-zA-Z0-9]+&token=[a-zA-Z0-9]+`,
+		).FindString(respBody)
 
-func py_scraper(unixSocketPath string, streamtapeVideoURL string) {
-	os.Setenv("StreamTapeVideoURL", streamtapeVideoURL)
-	os.Setenv("unixSocketPath", unixSocketPath)
-	defer os.Unsetenv("StreamTapeVideoURL")
-	defer os.Unsetenv("unixSocketPath")
+		// Video Title
+		videoTitle = regexp.MustCompile(
+			`.*<meta name=\"og:title\" content=\"(.*?)\">`,
+		).FindStringSubmatch(respBody)[1]
+	)
 
-	var pyScript = C.CString(`
-import re
-import os
-import sys
-import json
-import socket
-import requests
+	if videoLink == "" {
+		return "", "", errors.New("couldt get videoLink")
+	}
+	if videoTitle == "" {
+		return "", "", errors.New("couldt get videoTitle")
+	}
 
-streamtapeVideoURL = os.environ["StreamTapeVideoURL"]
-unix_sock_path = os.environ["unixSocketPath"]
+	fmt.Printf(
+		"\n==< TITLE >==\n%s\n\n==< Link >==\n%s\n\n",
+		videoTitle,
+		videoLink,
+	)
 
-# stolen from  https://github.com/fluffysatoshi/streamtape2curl/blob/master/streamtape2curl.py
-html = requests.get(streamtapeVideoURL).content.decode()
-token = re.match(r".*document.getElementById.*\('norobotlink'\).innerHTML =.*?token=(.*?)'.*?;", html, re.M|re.S).group(1)
-infix=re.match(r'.*<div id="ideoooolink" style="display:none;">(.*?token=).*?<[/]div>', html, re.M|re.S).group(1)
+	url, err := url.Parse(streamtapeVideoURL)
+	if err != nil {
+		return "", "", errors.New("couldt parse StreamTape-Video-URL")
+	}
 
-downloadURL=f'http:/{infix}{token}'
-title=re.match(r'.*<meta name="og:title" content="(.*?)">', html, re.M|re.S).group(1)
+	videoLink = fmt.Sprintf(
+		"%s://%s%s",
+		url.Scheme,
+		url.Host,
+		videoLink,
+	)
 
-# hier fängts an
-client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-client.connect(unix_sock_path)
-client.sendall(json.dumps(
-    {
-        "StreamTapeVideoTitle": title,
-        "StreamTapeVideoDownloadURL": downloadURL,
-}
-).encode())
-client.close()
-`)
-
-	C.Py_Initialize()
-	C.PyRun_SimpleString(pyScript)
-	C.free(unsafe.Pointer(pyScript))
-	C.Py_Finalize()
+	return videoTitle, videoLink, nil
 }
